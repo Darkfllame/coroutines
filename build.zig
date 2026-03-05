@@ -1,16 +1,7 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{
-        .whitelist = &.{
-            std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86_64 },
-            std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86_64 },
-            std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86_64 },
-            std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86_64 },
-            // std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86, .abi = .gnu },
-            // std.Target.Query{ .os_tag = .linux, .cpu_arch = .x86, .abi = .musl },
-        },
-    });
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
     const file_obj = compileASM(b, target, optimize);
