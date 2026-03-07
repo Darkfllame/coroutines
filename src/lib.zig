@@ -473,8 +473,8 @@ pub fn Coroutine(comptime T: type) type {
             self.* = undefined;
         }
 
-        pub fn await(self: *Self, do_cancel: bool) T {
-            self.any.state.canceled = do_cancel;
+        pub fn await(self: *Self, kind: enum { await, cancel }) T {
+            self.any.state.canceled = kind == .cancel;
             while (self.ret == null) self.any.raw.@"resume"();
             const ret = self.ret.?;
             return ret;
