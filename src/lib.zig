@@ -71,13 +71,11 @@ inline fn convertReturnType(comptime T: type, v: ?T) AdaptedReturnType(T) {
 }
 
 const RawCoroutine = extern struct {
-    const WindowsStackPtr = if (builtin.os.tag == .windows) *anyopaque else void;
-
-    top: WindowsStackPtr,
-    bottom: WindowsStackPtr,
+    top: *anyopaque,
+    bottom: *anyopaque,
     rsp: *anyopaque,
     rbp: *anyopaque,
-    rip: *const CoroFunction,
+    rip: *const anyopaque,
     regs: [5]usize = undefined,
 
     const @"resume" = @extern(*const fn (self: *RawCoroutine) callconv(.c) void, .{
@@ -169,7 +167,7 @@ pub const cocall: std.builtin.CallingConvention = switch (builtin.cpu.arch) {
 };
 
 /// Function signature for coroutines. Only used with `Coroutine(T).initRaw`
-pub const CoroFunction = fn (*RawCoroutine) callconv(cocall) noreturn;
+const CoroFunction = fn (*RawCoroutine) callconv(cocall) noreturn;
 
 /// This struct should not be initialized anywhere else than
 /// in this library. It is passed as the first argument of
@@ -236,12 +234,13 @@ pub const AnyCoroutine = struct {
         self.* = .{
             .allocated = mapped,
             .data = &mapped[data_offset],
+            .fn_ptr = @ptrCast(&RawCoroutine.alwaysYield),
             .raw = .{
-                .top = if (builtin.os.tag == .windows) &mapped[guard_offset] else {},
-                .bottom = if (builtin.os.tag == .windows) stack_bottom else {},
+                .top = &mapped[guard_offset],
+                .bottom = stack_bottom,
                 .rsp = stack_bottom,
                 .rbp = stack_bottom,
-                .rip = @ptrCast(&RawCoroutine.alwaysYield),
+                .rip = &RawCoroutine.alwaysYield,
             },
             .state = .{
                 .canceled = false,
@@ -265,8 +264,16 @@ pub const AnyCoroutine = struct {
         else => @compileError("Operating System unsupported"),
     };
 
+    fn reinit(self: *AnyCoroutine) void {
+        self.raw.rsp = self.raw.bottom;
+        self.raw.rbp = self.raw.bottom;
+        self.raw.rip = self.fn_ptr;
+        self.state.canceled = false;
+    }
+
     allocated: []align(page_size_min) u8,
     data: *anyopaque,
+    fn_ptr: *const CoroFunction,
     raw: RawCoroutine,
     state: IoState,
 
@@ -366,6 +373,7 @@ pub fn Coroutine(comptime T: type) type {
                 data_align,
             );
             @memcpy(@as([*]u8, @ptrCast(self.any.data)), additional_data);
+            self.any.fn_ptr = function;
             self.any.raw.rip = function;
             self.any.state.max_sleep_time = options.max_sleep_time orelse -1;
             self.ret = null;
@@ -450,17 +458,23 @@ pub fn Coroutine(comptime T: type) type {
             return self.initFnPtr(options, @TypeOf(function), function, args);
         }
 
+        /// Re-initialize the coroutine.
+        ///
+        /// Allows the previous function to run again without
+        /// re-allocating memory. Useful for coroutines that can
+        /// return values then re-runs right after.
+        pub fn reinit(self: *Self) void {
+            self.any.reinit();
+            self.ret = null;
+        }
+
         pub fn deinit(self: *Self) void {
             self.any.destroy();
             self.* = undefined;
         }
 
-        pub inline fn cancel(self: *Self) T {
-            self.any.canceled = true;
-            return self.await();
-        }
-
-        pub fn await(self: *Self) T {
+        pub fn await(self: *Self, do_cancel: bool) T {
+            self.any.state.canceled = do_cancel;
             while (self.ret == null) self.any.raw.@"resume"();
             const ret = self.ret.?;
             return ret;

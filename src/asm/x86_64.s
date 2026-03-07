@@ -5,10 +5,8 @@ global coro_always_yield
 section .text
 
 struc RawCoroutine
-    %ifdef WINDOWS
     .top: resq 1
     .bottom: resq 1
-    %endif
     .rsp: resq 1
     .rbp: resq 1
     .rip: resq 1
