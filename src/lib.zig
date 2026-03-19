@@ -78,10 +78,10 @@ const RawCoroutine = extern struct {
     rip: *const anyopaque,
     regs: [5]usize = undefined,
 
-    const @"resume" = @extern(*const fn (self: *RawCoroutine) callconv(.c) void, .{
+    const @"resume" = @extern(*const fn (self: *RawCoroutine) callconv(cocall) void, .{
         .name = "coro_resume",
     }).*;
-    const yield = @extern(*const fn (self: *RawCoroutine) callconv(.c) void, .{
+    const yield = @extern(*const fn (self: *RawCoroutine) callconv(cocall) void, .{
         .name = "coro_yield",
     }).*;
     const alwaysYield = @extern(*const fn (self: *RawCoroutine) callconv(cocall) void, .{
