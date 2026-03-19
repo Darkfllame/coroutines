@@ -335,6 +335,9 @@ pub fn Coroutine(comptime T: type) type {
                 .any = .{
                     .allocated = &.{},
                     .raw = undefined,
+                    .data = undefined,
+                    .fn_ptr = undefined,
+                    .state = undefined,
                 },
                 .ret = value,
             };
@@ -474,10 +477,14 @@ pub fn Coroutine(comptime T: type) type {
         }
 
         pub fn await(self: *Self, kind: enum { await, cancel }) T {
-            self.any.state.canceled = kind == .cancel;
+            if (kind == .cancel) self.any.state.canceled = true;
             while (self.ret == null) self.any.raw.@"resume"();
             const ret = self.ret.?;
             return ret;
+        }
+
+        pub fn markCancel(self: *Self) void {
+            self.any.state.canceled = true;
         }
 
         /// `RetType` is a transformation of `T`.
