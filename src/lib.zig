@@ -70,23 +70,96 @@ inline fn convertReturnType(comptime T: type, v: ?T) AdaptedReturnType(T) {
     };
 }
 
-const RawCoroutine = extern struct {
-    top: *anyopaque,
-    bottom: *anyopaque,
+const StackState = extern struct {
     rsp: *anyopaque,
     rbp: *anyopaque,
     rip: *const anyopaque,
-    regs: [5]usize = undefined,
+    top: if (builtin.os.tag == .windows) *anyopaque else void,
+    bottom: if (builtin.os.tag == .windows) *anyopaque else void,
 
-    const @"resume" = @extern(*const fn (self: *RawCoroutine) callconv(cocall) void, .{
-        .name = "coro_resume",
-    }).*;
-    const yield = @extern(*const fn (self: *RawCoroutine) callconv(cocall) void, .{
-        .name = "coro_yield",
-    }).*;
-    const alwaysYield = @extern(*const fn (self: *RawCoroutine) callconv(cocall) void, .{
-        .name = "coro_always_yield",
-    }).*;
+    inline fn switchStack(self: *StackState) void {
+        if (builtin.os.tag == .windows) {
+            const teb = std.os.windows.teb();
+            teb.NtTib.StackBase = self.bottom;
+            teb.NtTib.StackLimit = self.top;
+        }
+        asm volatile (
+            \\ xchgq %%rsp, 0(%%rdi)
+            \\ xchgq %%rbp, 8(%%rdi)
+            \\ leaq 0f(%%rip), %%rax
+            \\ xchgq %%rax, 16(%%rdi)
+            \\ jmpq *%%rax
+            \\0:
+            :
+            : [rawcoro] "{rdi}" (self),
+            : .{
+              .rax = true,
+              .rcx = true,
+              .rdx = true,
+              .rbx = true,
+              .rsi = true,
+              .rdi = true,
+              .r8 = true,
+              .r9 = true,
+              .r10 = true,
+              .r11 = true,
+              .r12 = true,
+              .r13 = true,
+              .r14 = true,
+              .r15 = true,
+              .mm0 = true,
+              .mm1 = true,
+              .mm2 = true,
+              .mm3 = true,
+              .mm4 = true,
+              .mm5 = true,
+              .mm6 = true,
+              .mm7 = true,
+              .zmm0 = true,
+              .zmm1 = true,
+              .zmm2 = true,
+              .zmm3 = true,
+              .zmm4 = true,
+              .zmm5 = true,
+              .zmm6 = true,
+              .zmm7 = true,
+              .zmm8 = true,
+              .zmm9 = true,
+              .zmm10 = true,
+              .zmm11 = true,
+              .zmm12 = true,
+              .zmm13 = true,
+              .zmm14 = true,
+              .zmm15 = true,
+              .zmm16 = true,
+              .zmm17 = true,
+              .zmm18 = true,
+              .zmm19 = true,
+              .zmm20 = true,
+              .zmm21 = true,
+              .zmm22 = true,
+              .zmm23 = true,
+              .zmm24 = true,
+              .zmm25 = true,
+              .zmm26 = true,
+              .zmm27 = true,
+              .zmm28 = true,
+              .zmm29 = true,
+              .zmm30 = true,
+              .zmm31 = true,
+              .fpsr = true,
+              .fpcr = true,
+              .mxcsr = true,
+              .rflags = true,
+              .dirflag = true,
+              .memory = true,
+            });
+    }
+
+    fn alwaysYield(self: *StackState) callconv(.c) noreturn {
+        self.switchStack();
+        unreachable;
+    }
 };
 
 fn AdaptedReturnType(comptime T: type) type {
@@ -139,35 +212,8 @@ fn FnPtr(comptime Fn: type) type {
     };
 }
 
-/// Calling convention of a coroutine. Only used with `Coroutine(T).initRaw`
-///
-/// Yes the stack is 8-bytes aligned, and yes this is a genuine skill issue.
-/// Assembly is hard!
-pub const cocall: std.builtin.CallingConvention = switch (builtin.cpu.arch) {
-    .powerpc, .powerpcle => .{ .powerpc_sysv = .{
-        .incoming_stack_alignment = 8,
-    } },
-
-    .x86_64, // Currently only supported one
-    .x86,
-    .sparc,
-    .arc,
-    .csky,
-    .hexagon,
-    .lanai,
-    .m68k,
-    .or1k,
-    .propeller,
-    .s390x,
-    .ve,
-    => |tag| @unionInit(std.builtin.CallingConvention, @tagName(tag) ++ "_sysv", .{
-        .incoming_stack_alignment = 8,
-    }),
-    else => @compileError("Unsupported architecture"),
-};
-
 /// Function signature for coroutines. Only used with `Coroutine(T).initRaw`
-const CoroFunction = fn (*RawCoroutine) callconv(cocall) noreturn;
+const CoroFunction = fn (*StackState) callconv(.c) noreturn;
 
 /// This struct should not be initialized anywhere else than
 /// in this library. It is passed as the first argument of
@@ -234,13 +280,15 @@ pub const AnyCoroutine = struct {
         self.* = .{
             .allocated = mapped,
             .data = &mapped[data_offset],
-            .fn_ptr = @ptrCast(&RawCoroutine.alwaysYield),
-            .raw = .{
-                .top = &mapped[guard_offset],
-                .bottom = stack_bottom,
-                .rsp = stack_bottom,
+            .fn_ptr = @ptrCast(&StackState.alwaysYield),
+            .stack = .{
+                .top = {},
+                .bottom = {},
+                // -8 because the C calling convention also counts the base pointer
+                // for stack alignement.
+                .rsp = @ptrFromInt(@intFromPtr(stack_bottom) - @sizeOf(usize)),
                 .rbp = stack_bottom,
-                .rip = &RawCoroutine.alwaysYield,
+                .rip = &StackState.alwaysYield,
             },
             .state = .{
                 .canceled = false,
@@ -265,16 +313,16 @@ pub const AnyCoroutine = struct {
     };
 
     fn reinit(self: *AnyCoroutine) void {
-        self.raw.rsp = self.raw.bottom;
-        self.raw.rbp = self.raw.bottom;
-        self.raw.rip = self.fn_ptr;
+        self.stack.rsp = self.stack.bottom;
+        self.stack.rbp = self.stack.bottom;
+        self.stack.rip = self.fn_ptr;
         self.state.canceled = false;
     }
 
     allocated: []align(page_size_min) u8,
     data: *anyopaque,
     fn_ptr: *const CoroFunction,
-    raw: RawCoroutine,
+    stack: StackState,
     state: IoState,
 
     pub const IoState = struct {
@@ -283,7 +331,7 @@ pub const AnyCoroutine = struct {
     };
 
     pub fn yield(self: *AnyCoroutine) Io.Cancelable!void {
-        self.raw.yield();
+        self.stack.switchStack();
         if (self.state.canceled) return error.Canceled;
     }
 
@@ -334,7 +382,7 @@ pub fn Coroutine(comptime T: type) type {
             return .{
                 .any = .{
                     .allocated = &.{},
-                    .raw = undefined,
+                    .stack = undefined,
                     .data = undefined,
                     .fn_ptr = undefined,
                     .state = undefined,
@@ -377,7 +425,7 @@ pub fn Coroutine(comptime T: type) type {
             );
             @memcpy(@as([*]u8, @ptrCast(self.any.data)), additional_data);
             self.any.fn_ptr = function;
-            self.any.raw.rip = function;
+            self.any.stack.rip = function;
             self.any.state.max_sleep_time = options.max_sleep_time orelse -1;
             self.ret = null;
         }
@@ -413,8 +461,8 @@ pub fn Coroutine(comptime T: type) type {
                 ptr: *const Fn,
                 args: @TypeOf(args),
 
-                fn call(co: *RawCoroutine) callconv(cocall) noreturn {
-                    const any: *AnyCoroutine = @alignCast(@fieldParentPtr("raw", co));
+                fn call(co: *StackState) callconv(.c) noreturn {
+                    const any: *AnyCoroutine = @alignCast(@fieldParentPtr("stack", co));
                     const _self: *Self = @fieldParentPtr("any", any);
                     const args_ptr: *@This() = @ptrCast(@alignCast(any.data));
                     _self.ret = @call(
@@ -422,7 +470,7 @@ pub fn Coroutine(comptime T: type) type {
                         args_ptr.ptr,
                         .{any} ++ args_ptr.args,
                     );
-                    co.yield();
+                    co.switchStack();
                     unreachable; // switched to dead coroutine
                 }
             };
@@ -478,7 +526,7 @@ pub fn Coroutine(comptime T: type) type {
 
         pub fn await(self: *Self, kind: enum { await, cancel }) T {
             if (kind == .cancel) self.any.state.canceled = true;
-            while (self.ret == null) self.any.raw.@"resume"();
+            while (self.ret == null) self.any.stack.switchStack();
             const ret = self.ret.?;
             return ret;
         }
@@ -499,7 +547,7 @@ pub fn Coroutine(comptime T: type) type {
         /// it is not finished.
         pub fn @"resume"(self: *Self) RetType {
             if (self.ret) |ret| return convertReturnType(T, ret);
-            self.any.raw.@"resume"();
+            self.any.stack.switchStack();
             return convertReturnType(T, self.ret);
         }
     };

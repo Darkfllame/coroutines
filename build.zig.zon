@@ -2,13 +2,7 @@
     .name = .coroutine,
     .fingerprint = 0x5cb61c7041020f7e,
     .version = "0.0.1",
-    .dependencies = .{
-        .nasm = .{
-            .url = "git+https://github.com/Darkfllame/nasm#1ba8cbe5016ea98799f4ff15409acd4599ee1f25",
-            .hash = "nasm-3.0.1-B_NnpQxQAAB4qpK2LmnxjdW_Hq-pGBaaYeLtqabBld3d",
-            .lazy = true,
-        },
-    },
+    .dependencies = .{},
     .minimum_zig_version = "0.16.0-dev.2637+6a9510c0e",
     .paths = .{
         "src/",
