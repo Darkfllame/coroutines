@@ -90,5 +90,5 @@ application to be single-threaded (no need for mutexes, semaphore or any sort of
 that no-one wants to deal with)
 
 ## Final note
-This library is a part (and developped along) [Gecko (private, WIP)](github.com/Darkfllame/Gecko), a Minecraft
+This library is a part (and developped along) [Gecko (private, WIP)](http://github.com/Darkfllame/Gecko), a Minecraft
 server software written in Zig, from scratch.
