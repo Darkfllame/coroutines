@@ -838,7 +838,7 @@ fn netWriteFileUnimplemented(
     @panic("TODO: Implement netWriteFile");
 }
 
-fn netSendUnavailable(
+fn netSendUnimplemented(
     userdata: ?*anyopaque,
     handle: net.Socket.Handle,
     messages: []net.OutgoingMessage,
@@ -1039,7 +1039,7 @@ pub const vtable = Io.VTable{
     .netRead = netRead,
     .netWrite = netWrite,
     .netWriteFile = netWriteFileUnimplemented,
-    .netSend = netSendUnavailable,
+    .netSend = netSendUnimplemented,
     .netReceive = netReceiveUnimplemented,
     .netInterfaceNameResolve = netInterfaceNameResolve,
     .netInterfaceName = netInterfaceNameUnimplemented,

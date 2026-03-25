@@ -546,9 +546,13 @@ pub fn Coroutine(comptime T: type) type {
         /// otherwise it's just `?T` with `null` meaning
         /// it is not finished.
         pub fn @"resume"(self: *Self) RetType {
-            if (self.ret) |ret| return convertReturnType(T, ret);
+            return convertReturnType(T, self.resumeRaw());
+        }
+
+        pub fn resumeRaw(self: *Self) ?T {
+            if (self.ret) |ret| return ret;
             self.any.stack.switchStack();
-            return convertReturnType(T, self.ret);
+            return self.ret;
         }
     };
 }
