@@ -549,6 +549,10 @@ pub fn Coroutine(comptime T: type) type {
             return convertReturnType(T, self.resumeRaw());
         }
 
+        pub fn hasFinished(self: Self) bool {
+            return self.ret != null;
+        }
+
         pub fn resumeRaw(self: *Self) ?T {
             if (self.ret) |ret| return ret;
             self.any.stack.switchStack();
