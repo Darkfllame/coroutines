@@ -43,6 +43,7 @@ const Allocator = mem.Allocator;
 const assert = std.debug.assert;
 
 const page_size_min = std.heap.page_size_min;
+const is_windows = builtin.os.tag == .windows;
 
 /// If `T` is `void`:
 ///   - Converts `null` to `false`.
@@ -74,14 +75,17 @@ const StackState = extern struct {
     rsp: *anyopaque,
     rbp: *anyopaque,
     rip: *const anyopaque,
-    top: if (builtin.os.tag == .windows) *anyopaque else void,
-    bottom: if (builtin.os.tag == .windows) *anyopaque else void,
+    top: if (is_windows) *anyopaque else void,
+    bottom: if (is_windows) *anyopaque else void,
 
     inline fn switchStack(self: *StackState) void {
-        if (builtin.os.tag == .windows) {
-            const teb = std.os.windows.teb();
-            teb.NtTib.StackBase = self.bottom;
-            teb.NtTib.StackLimit = self.top;
+        if (is_windows) {
+            const tib = &std.os.windows.teb().NtTib;
+            const old = tib.*;
+            tib.StackBase = self.bottom;
+            tib.StackLimit = self.top;
+            self.bottom = old.StackBase;
+            self.top = tib.StackLimit;
         }
         asm volatile (
             \\ xchgq %%rsp, 0(%%rdi)
